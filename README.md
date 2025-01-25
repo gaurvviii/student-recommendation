@@ -35,7 +35,8 @@ This project is a comprehensive tool for analyzing and visualizing student perfo
 ### 1. Clone the repository
 
 ```bash
-
+https://github.com/gaurvviii/student-recommendation.git
+cd student-recommendation
 ```
 
 ### 2. Install dependencies
