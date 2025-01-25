@@ -1,5 +1,6 @@
 import pandas as pd
 import requests
+import streamlit as st
 
 # Fetch data from API
 def fetch_data(url):
@@ -11,9 +12,9 @@ def fetch_data(url):
 
 # Load all datasets
 def load_data():
-    quiz_endpoint_url = "https://jsonkeeper.com/b/LLQT"
-    submission_data_url = "https://api.jsonserve.com/rJvd7g"
-    historical_data_url = "https://api.jsonserve.com/XgAgFJ"
+    quiz_endpoint_url = "https://example.com/quiz_endpoint"
+    submission_data_url = "https://example.com/submission_data"
+    historical_data_url = "https://example.com/historical_data"
 
     quiz_data = fetch_data(quiz_endpoint_url)
     submission_data = fetch_data(submission_data_url)
@@ -85,3 +86,30 @@ def create_recommendations(persona_analysis):
         recommendations.append("Continue practicing to maintain your performance.")
     return recommendations
 
+# Streamlit App
+def main():
+    st.title("Student Persona Analysis")
+    student_id = st.number_input("Enter Student ID", value=1, step=1)
+    if st.button("Analyze"):
+        quiz_data, submission_data, historical_data = load_data()
+        persona_analysis = analyze_student_persona(quiz_data, submission_data, historical_data, student_id)
+        insights = generate_insights(persona_analysis)
+        recommendations = create_recommendations(persona_analysis)
+
+        st.subheader("Persona Summary")
+        st.write(f"Total Quizzes Taken: {persona_analysis['total_quizzes']}")
+        st.write(f"Average Score: {persona_analysis['avg_score']:.2f}")
+
+        st.subheader("Performance by Topic")
+        st.dataframe(persona_analysis['performance_by_topic'])
+
+        st.subheader("Insights")
+        for insight in insights:
+            st.write(f"- {insight}")
+
+        st.subheader("Recommendations")
+        for recommendation in recommendations:
+            st.write(f"- {recommendation}")
+
+if __name__ == "__main__":
+    main()
