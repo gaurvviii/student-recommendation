@@ -1,6 +1,3 @@
-Here's a sample README with setup instructions, project overview, and approach description:
-
----
 
 # Student Performance Analysis Dashboard
 
@@ -112,6 +109,3 @@ The app generates insights based on overall performance, such as trends in accur
 
 This tool helps both educators and students track quiz performance, identify areas for improvement, and provides data-driven recommendations to enhance learning outcomes. By using the interactive dashboard, users can easily explore performance trends, topic-wise analysis, and make informed decisions on improving learning strategies.
 
----
-
-Make sure to replace `your-username` with your actual GitHub username in the clone command, and adjust the instructions based on any additional custom configurations or details specific to your setup. Let me know if you need further edits!
