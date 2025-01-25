@@ -1,115 +1,162 @@
+import json
 import pandas as pd
-import requests
-import streamlit as st
+import numpy as np
+import matplotlib.pyplot as plt
+from collections import defaultdict
 
-# Fetch data from API
-def fetch_data(url):
-    response = requests.get(url)
-    if response.status_code == 200:
-        return pd.DataFrame(response.json())
-    else:
-        raise Exception(f"Failed to fetch data from {url}")
-
-# Load all datasets
+# Step 1: Load the quiz and submission data
 def load_data():
-    quiz_endpoint_url = "https://example.com/quiz_endpoint"
-    submission_data_url = "https://example.com/submission_data"
-    historical_data_url = "https://example.com/historical_data"
+    with open('quiz_data.json', 'r') as f:
+        quiz_data = json.load(f)
+    
+    with open('quiz_submission_data.json', 'r') as f:
+        submission_data = json.load(f)
+    
+    return quiz_data, submission_data
 
-    quiz_data = fetch_data(quiz_endpoint_url)
-    submission_data = fetch_data(submission_data_url)
-    historical_data = fetch_data(historical_data_url)
+# Step 2: Process Data and Analyze Student Performance
+def process_submission_data(submission_data):
+    student_performance = []
+    for submission in submission_data:
+        student_id = submission['user_id']
+        quiz_title = submission['quiz']['title']
+        accuracy = float(submission['accuracy'].strip('%'))
+        total_score = submission['final_score']
+        correct_answers = submission['correct_answers']
+        incorrect_answers = submission['incorrect_answers']
+        topics = submission['quiz']['topic']
+        question_count = submission['total_questions']
+        
+        student_performance.append({
+            'student_id': student_id,
+            'quiz_title': quiz_title,
+            'accuracy': accuracy,
+            'total_score': total_score,
+            'correct_answers': correct_answers,
+            'incorrect_answers': incorrect_answers,
+            'topics': topics,
+            'question_count': question_count
+        })
+    
+    performance_df = pd.DataFrame(student_performance)
+    return performance_df
 
-    return quiz_data, submission_data, historical_data
-
-# Analyze student persona
-def analyze_student_persona(quiz_data, submission_data, historical_data, student_id):
-    student_quiz_data = quiz_data[quiz_data['student_id'] == student_id]
-    student_submission_data = submission_data[submission_data['student_id'] == student_id]
-    student_historical_data = historical_data[historical_data['student_id'] == student_id]
-
-    total_quizzes = len(student_historical_data['quiz_id'].unique())
-    avg_score = student_historical_data['score'].mean()
-
-    merged_data = pd.merge(
-        student_quiz_data, 
-        student_submission_data, 
-        on=['quiz_id', 'student_id'], 
-        how='inner'
-    )
-
-    performance_by_topic = merged_data.groupby('topic').agg({
-        'accuracy': 'mean',
-        'difficulty': 'mean',
-        'response_time': 'mean'
+# Step 3: Analyze Student Performance
+def analyze_performance(performance_df):
+    # Performance by topic
+    topic_performance = performance_df.groupby('topics').agg({
+        'accuracy': ['mean', 'std'],
+        'total_score': 'mean',
+        'correct_answers': 'sum',
+        'incorrect_answers': 'sum',
+        'question_count': 'mean'
     }).reset_index()
 
-    weak_topics = performance_by_topic[performance_by_topic['accuracy'] < 0.5]
-    strong_topics = performance_by_topic[performance_by_topic['accuracy'] >= 0.8]
+    print("Performance by Topic:\n", topic_performance)
 
-    return {
-        'total_quizzes': total_quizzes,
-        'avg_score': avg_score,
-        'weak_topics': weak_topics,
-        'strong_topics': strong_topics,
-        'performance_by_topic': performance_by_topic
-    }
+    # Plot performance by topics
+    plt.figure(figsize=(10, 6))
+    plt.bar(topic_performance['topics'], topic_performance[('accuracy', 'mean')], color='blue', alpha=0.7)
+    plt.xlabel('Topic')
+    plt.ylabel('Average Accuracy (%)')
+    plt.title('Average Accuracy by Topic')
+    plt.xticks(rotation=90)
+    plt.show()
 
-# Generate insights
-def generate_insights(persona_analysis):
-    weak_topics = persona_analysis['weak_topics']['topic'].tolist()
-    strong_topics = persona_analysis['strong_topics']['topic'].tolist()
+    return topic_performance
 
-    insights = []
-    if weak_topics:
-        insights.append(f"Focus on improving: {', '.join(weak_topics)}")
+# Step 4: Identify Weak Areas and Performance Gaps
+def identify_weak_areas(performance_df, topic_performance):
+    # Weak areas based on accuracy per topic
+    weak_areas = topic_performance[topic_performance[('accuracy', 'mean')] < 70]  # Topics with <70% accuracy
+    print("\nWeak Areas (accuracy < 70%):\n", weak_areas)
+
+    # Highlighting students who are struggling
+    students_struggling = performance_df[performance_df['accuracy'] < 60]
+    print("\nStudents Struggling (accuracy < 60%):\n", students_struggling[['student_id', 'quiz_title', 'accuracy']])
+
+    return weak_areas, students_struggling
+
+# Step 5: Generate Recommendations
+def generate_recommendations(student_id, performance_df, weak_areas):
+    # Suggest improvement topics
+    student_data = performance_df[performance_df['student_id'] == student_id]
+    weak_topics = student_data.groupby('topics').agg({
+        'accuracy': 'mean',
+        'incorrect_answers': 'sum'
+    }).reset_index()
+
+    weak_topics = weak_topics[weak_topics['accuracy'] < 60]
+    suggestions = weak_topics[['topics', 'accuracy']]
+    
+    if not suggestions.empty:
+        print(f"\nSuggested Topics for Improvement for Student {student_id}:")
+        print(suggestions)
     else:
-        insights.append("No weak topics detected—keep up the good work!")
+        print(f"\nStudent {student_id} is performing well.")
+    
+    # Class-wide suggestions for improvement
+    top_3_topics_for_improvement = weak_areas.sort_values(by=('accuracy', 'mean')).head(3)
+    print("\nClass-Wide Suggested Topics for Improvement:\n", top_3_topics_for_improvement)
 
-    if strong_topics:
-        insights.append(f"Excellent performance in: {', '.join(strong_topics)}")
+# Step 6: Define Student Persona Based on Performance
+def define_student_persona(student_id, performance_df):
+    student_data = performance_df[performance_df['student_id'] == student_id]
+    avg_accuracy = student_data['accuracy'].mean()
+    avg_score = student_data['total_score'].mean()
+
+    if avg_accuracy > 85 and avg_score > 90:
+        return "Top Performer"
+    elif avg_accuracy < 60:
+        return "Needs Improvement"
     else:
-        insights.append("No strong topics yet. Aim for 80%+ accuracy in specific topics.")
+        return "Average Performer"
 
-    return insights
+# Step 7: Visualize Overall Performance Insights
+def visualize_class_performance(performance_df):
+    # Class-level insights
+    class_performance = performance_df.groupby('topics').agg({
+        'accuracy': 'mean',
+        'total_score': 'mean',
+        'correct_answers': 'sum',
+        'incorrect_answers': 'sum'
+    }).reset_index()
 
-# Create recommendations
-def create_recommendations(persona_analysis):
-    recommendations = []
-    weak_topics = persona_analysis['weak_topics']
-    if not weak_topics.empty:
-        for _, row in weak_topics.iterrows():
-            recommendations.append(
-                f"Practice more questions in {row['topic']} (Difficulty Avg: {row['difficulty']:.1f})"
-            )
-    else:
-        recommendations.append("Continue practicing to maintain your performance.")
-    return recommendations
+    # Visualize class-wide accuracy trends
+    plt.figure(figsize=(10, 6))
+    plt.bar(class_performance['topics'], class_performance['accuracy'], color='green', alpha=0.7)
+    plt.xlabel('Topic')
+    plt.ylabel('Class Average Accuracy (%)')
+    plt.title('Class Average Accuracy by Topic')
+    plt.xticks(rotation=90)
+    plt.show()
 
-# Streamlit App
+    return class_performance
+
+# Main function to run the analysis
 def main():
-    st.title("Student Persona Analysis")
-    student_id = st.number_input("Enter Student ID", value=1, step=1)
-    if st.button("Analyze"):
-        quiz_data, submission_data, historical_data = load_data()
-        persona_analysis = analyze_student_persona(quiz_data, submission_data, historical_data, student_id)
-        insights = generate_insights(persona_analysis)
-        recommendations = create_recommendations(persona_analysis)
+    # Load data
+    quiz_data, submission_data = load_data()
 
-        st.subheader("Persona Summary")
-        st.write(f"Total Quizzes Taken: {persona_analysis['total_quizzes']}")
-        st.write(f"Average Score: {persona_analysis['avg_score']:.2f}")
+    # Process data
+    performance_df = process_submission_data(submission_data)
 
-        st.subheader("Performance by Topic")
-        st.dataframe(persona_analysis['performance_by_topic'])
+    # Analyze performance
+    topic_performance = analyze_performance(performance_df)
 
-        st.subheader("Insights")
-        for insight in insights:
-            st.write(f"- {insight}")
+    # Identify weak areas
+    weak_areas, students_struggling = identify_weak_areas(performance_df, topic_performance)
 
-        st.subheader("Recommendations")
-        for recommendation in recommendations:
-            st.write(f"- {recommendation}")
+    # Generate recommendations for a specific student (example: student ID 'YcDFSO4ZukTJnnFMgRNVwZTE4j42')
+    student_id = 'YcDFSO4ZukTJnnFMgRNVwZTE4j42'
+    generate_recommendations(student_id, performance_df, weak_areas)
+
+    # Define student persona
+    persona = define_student_persona(student_id, performance_df)
+    print(f"\nStudent Persona for {student_id}: {persona}")
+
+    # Visualize overall class performance
+    class_performance = visualize_class_performance(performance_df)
 
 if __name__ == "__main__":
     main()
