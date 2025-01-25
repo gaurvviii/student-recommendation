@@ -1,154 +1,240 @@
 import json
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from datetime import datetime
+from collections import defaultdict
 
-# Step 1: Load the quiz and submission data
-def load_data():
-    with open('data/quiz_data.json', 'r') as f:
-        quiz_data = json.load(f)
-    
-    with open('data/submission_data.json', 'r') as f:
-        submission_data = json.load(f)
-    
-    # Debugging: Check the type of submission_data
-    print(f"Type of submission_data: {type(submission_data)}")
-    if isinstance(submission_data, dict):  # If it's a dictionary, check if it contains the list under a key
-        submission_data = submission_data.get('submissions', [])
-    
-    with open('data/Historical_data.json', 'r') as f:
-        historical_data = json.load(f)
-    
-    return quiz_data, submission_data, historical_data
+@dataclass
+class PerformanceMetrics:
+    accuracy: float
+    score: float
+    correct_answers: int
+    incorrect_answers: int
+    total_questions: int
+    duration: str
+    topic: str
+    quiz_title: str
+    submission_date: datetime
 
-# Step 2: Process Data and Analyze Student Performance
-def process_submission_data(submission_data):
-    student_performance = []
-    for submission in submission_data:
-        # Check if submission is a dictionary
-        if isinstance(submission, dict):
-            student_id = submission['user_id']
-            quiz_title = submission['quiz_title']  # Direct access as per the new format
-            accuracy = submission['accuracy'] if isinstance(submission['accuracy'], float) else float(submission['accuracy'])
-            final_score = float(submission['final_score'])
-            correct_answers = submission['correct_answers']
-            incorrect_answers = submission['incorrect_answers']
-            topic = submission['quiz_topic']  
-            question_count = submission['total_questions']
+class PerformanceAnalyzer:
+    def __init__(self):
+        self.quiz_data = None
+        self.submission_data = None
+        self.historical_data = None
+        self.performance_df = None
 
-            student_performance.append({
-                'student_id': student_id,
-                'quiz_title': quiz_title,
-                'accuracy': accuracy,
-                'final_score': final_score,
-                'correct_answers': correct_answers,
-                'incorrect_answers': incorrect_answers,
-                'topic': topic,
-                'question_count': question_count
-            })
-        else:
-            print(f"Skipping non-dictionary entry: {submission}")
-    
-    performance_df = pd.DataFrame(student_performance)
-    return performance_df
+    def load_data(self) -> bool:
+        """Load all required data files."""
+        try:
+            with open('data/quiz_data.json', 'r') as f:
+                self.quiz_data = json.load(f)
+            
+            with open('data/submission_data.json', 'r') as f:
+                self.submission_data = json.load(f)
+                if isinstance(self.submission_data, dict):
+                    self.submission_data = self.submission_data.get('submissions', [])
+            
+            with open('data/historical_data.json', 'r') as f:
+                self.historical_data = json.load(f)
+            
+            return True
+        except FileNotFoundError as e:
+            print(f"Error loading data files: {e}")
+            return False
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON data: {e}")
+            return False
 
-# Step 3: Analyze Student Performance
-def analyze_performance(performance_df):
-    print(f"Columns in performance_df: {performance_df.columns.tolist()}")
+    def process_submission(self, submission: Dict) -> Optional[PerformanceMetrics]:
+        """Process a single submission and return metrics."""
+        try:
+            return PerformanceMetrics(
+                accuracy=float(submission['accuracy']),
+                score=float(submission['final_score']),
+                correct_answers=int(submission['correct_answers']),
+                incorrect_answers=int(submission['incorrect_answers']),
+                total_questions=int(submission['total_questions']),
+                duration=submission.get('duration', '00:00'),
+                topic=submission['quiz_topic'],
+                quiz_title=submission['quiz_title'],
+                submission_date=datetime.fromisoformat(submission['submitted_at'])
+            )
+        except (KeyError, ValueError) as e:
+            print(f"Error processing submission: {e}")
+            return None
 
-    # Performance by topic
-    if 'topic' in performance_df.columns:
-        topic_performance = performance_df.groupby('topic').agg({
-            'accuracy': ['mean', 'std'],
-            'final_score': 'mean',
-            'correct_answers': 'sum',
-            'incorrect_answers': 'sum',
-            'question_count': 'mean'
-        }).reset_index()
-        print("Performance by Topic:\n", topic_performance)
+    def analyze_submissions(self) -> pd.DataFrame:
+        """Process all submissions and convert to DataFrame."""
+        if not self.submission_data:
+            print("No submission data available")
+            return pd.DataFrame()
 
-        # Plot performance by topics
-        plt.figure(figsize=(10, 6))
-        plt.bar(topic_performance['topic'], topic_performance[('accuracy', 'mean')], color='blue', alpha=0.7)
-        plt.xlabel('Topic')
-        plt.ylabel('Average Accuracy (%)')
-        plt.title('Average Accuracy by Topic')
-        plt.xticks(rotation=90)
-        plt.show(block=False)
+        processed_data = []
+        for submission in self.submission_data:
+            if not isinstance(submission, dict):
+                continue
+                
+            metrics = self.process_submission(submission)
+            if metrics:
+                processed_data.append({
+                    'student_id': submission.get('user_id'),
+                    'quiz_title': metrics.quiz_title,
+                    'topic': metrics.topic,
+                    'accuracy': metrics.accuracy,
+                    'score': metrics.score,
+                    'correct_answers': metrics.correct_answers,
+                    'incorrect_answers': metrics.incorrect_answers,
+                    'total_questions': metrics.total_questions,
+                    'duration': metrics.duration,
+                    'submission_date': metrics.submission_date
+                })
+        
+        self.performance_df = pd.DataFrame(processed_data)
+        return self.performance_df
 
+    def analyze_topic_performance(self) -> Optional[pd.DataFrame]:
+        """Analyze performance by topic."""
+        if self.performance_df is None or self.performance_df.empty:
+            print("No performance data available")
+            return None
 
-        return topic_performance
-    else:
-        print("No 'topic' column found in the performance data.")
-        return None
+        try:
+            topic_metrics = self.performance_df.groupby('topic').agg({
+                'accuracy': ['mean', 'std', 'count'],
+                'score': ['mean', 'std'],
+                'correct_answers': 'sum',
+                'incorrect_answers': 'sum',
+                'total_questions': 'sum'
+            }).round(2)
 
-# Step 4: Analyze User's Performance and Generate Insights
-def analyze_user_performance(user_id, performance_df):
-    # Filter the data for the given user
-    user_data = performance_df[performance_df['student_id'] == user_id]
-    
-    # Weak areas: Identify topics with low accuracy
-    weak_areas = user_data.groupby('topic')['accuracy'].mean().sort_values().head(3)
-    
-    # Improvement trends: Compare accuracy over time (or across quizzes)
-    improvement_trends = user_data.groupby('quiz_title')['accuracy'].mean().sort_values(ascending=False)
-    
-    # Performance gaps: Compare the user's performance with the overall mean performance by topic
-    overall_performance_by_topic = performance_df.groupby('topic')['accuracy'].mean()
-    user_performance_by_topic = user_data.groupby('topic')['accuracy'].mean()
-    performance_gap = overall_performance_by_topic - user_performance_by_topic
-    
-    return weak_areas, improvement_trends, performance_gap
+            # Flatten column names
+            topic_metrics.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] 
+                                   for col in topic_metrics.columns]
+            return topic_metrics.reset_index()
+        except Exception as e:
+            print(f"Error analyzing topic performance: {e}")
+            return None
 
-# Step 5: Generate Recommendations based on the analysis
-def generate_recommendations(user_id, performance_df):
-    weak_areas, improvement_trends, performance_gap = analyze_user_performance(user_id, performance_df)
-    
-    recommendations = []
-    
-    # Recommend topics for improvement
-    recommendations.append("Focus on the following weak areas:")
-    for topic in weak_areas.index:
-        recommendations.append(f"  - {topic} (Accuracy: {weak_areas[topic]:.2f}%)")
-    
-    # Suggest additional practice on specific question types or levels
-    recommendations.append("\nRecommended next steps for improvement:")
-    if len(weak_areas) > 0:
-        recommendations.append("  - Practice more questions on the identified weak topics.")
-    else:
-        recommendations.append("  - Keep maintaining a consistent practice routine.")
-    
-    # Suggest a balanced approach to difficulty
-    recommendations.append("\nSuggested difficulty levels:")
-    if len(improvement_trends) > 0:
-        recommendations.append(f"  - Focus on intermediate-level questions for better mastery.")
-        recommendations.append(f"  - Gradually try more difficult quizzes once you improve in the basics.")
-    
-    return recommendations
+    def plot_performance_trends(self):
+        """Generate performance visualization plots."""
+        if self.performance_df is None or self.performance_df.empty:
+            print("No data available for plotting")
+            return
 
-# Main function to run the analysis
+        try:
+            plt.style.use('seaborn')
+            fig = plt.figure(figsize=(15, 10))
+
+            # Plot 1: Topic Performance
+            ax1 = fig.add_subplot(221)
+            topic_perf = self.performance_df.groupby('topic')['accuracy'].mean().sort_values()
+            topic_perf.plot(kind='barh', ax=ax1)
+            ax1.set_title('Average Accuracy by Topic')
+            ax1.set_xlabel('Accuracy (%)')
+
+            # Plot 2: Time Series Trend
+            ax2 = fig.add_subplot(222)
+            time_trend = self.performance_df.set_index('submission_date')['accuracy'].rolling('7D').mean()
+            time_trend.plot(ax=ax2)
+            ax2.set_title('7-Day Rolling Average Accuracy')
+            ax2.set_xlabel('Date')
+            ax2.set_ylabel('Accuracy (%)')
+
+            # Plot 3: Question Distribution
+            ax3 = fig.add_subplot(223)
+            self.performance_df['correct_ratio'] = (
+                self.performance_df['correct_answers'] / self.performance_df['total_questions']
+            )
+            self.performance_df['correct_ratio'].hist(ax=ax3, bins=20)
+            ax3.set_title('Distribution of Correct Answer Ratios')
+            ax3.set_xlabel('Correct Answer Ratio')
+            ax3.set_ylabel('Frequency')
+
+            # Plot 4: Topic Progress
+            ax4 = fig.add_subplot(224)
+            topic_progress = self.performance_df.pivot_table(
+                index='submission_date',
+                columns='topic',
+                values='accuracy',
+                aggfunc='mean'
+            ).rolling('7D').mean()
+            topic_progress.plot(ax=ax4)
+            ax4.set_title('Topic Progress Over Time')
+            ax4.set_xlabel('Date')
+            ax4.set_ylabel('Accuracy (%)')
+
+            plt.tight_layout()
+            plt.savefig('performance_analysis.png')
+            plt.close()
+
+        except Exception as e:
+            print(f"Error generating plots: {e}")
+
+    def generate_insights(self) -> List[str]:
+        """Generate insights from the performance data."""
+        if self.performance_df is None or self.performance_df.empty:
+            return ["No data available for analysis"]
+
+        insights = []
+        try:
+            # Overall performance
+            avg_accuracy = self.performance_df['accuracy'].mean()
+            total_questions = self.performance_df['total_questions'].sum()
+            insights.append(f"Overall Performance Summary:")
+            insights.append(f"• Average Accuracy: {avg_accuracy:.1f}%")
+            insights.append(f"• Total Questions Attempted: {total_questions}")
+
+            # Topic analysis
+            topic_metrics = self.analyze_topic_performance()
+            if topic_metrics is not None:
+                insights.append("\nTopic Analysis:")
+                for _, row in topic_metrics.iterrows():
+                    insights.append(
+                        f"• {row['topic']}:"
+                        f" Accuracy {row['accuracy_mean']:.1f}% (±{row['accuracy_std']:.1f}%),"
+                        f" {row['accuracy_count']} attempts"
+                    )
+
+            # Trend analysis
+            recent_trend = self.performance_df.sort_values('submission_date').tail(5)['accuracy'].mean()
+            overall_mean = self.performance_df['accuracy'].mean()
+            trend_diff = recent_trend - overall_mean
+            
+            insights.append("\nRecent Performance Trend:")
+            if abs(trend_diff) > 5:
+                direction = "improving" if trend_diff > 0 else "declining"
+                insights.append(f"• Performance is {direction} ({trend_diff:+.1f}% vs overall average)")
+            else:
+                insights.append("• Performance is stable")
+
+        except Exception as e:
+            insights.append(f"Error generating insights: {e}")
+
+        return insights
+
 def main():
-    # Load data
-    quiz_data, submission_data, historical_data = load_data()
-
-    # Process data
-    performance_df = process_submission_data(submission_data)
-
-    # Analyze performance
-    if performance_df is not None:
-        topic_performance = analyze_performance(performance_df)
-        if topic_performance is not None:
-            # Perform further analysis
-            pass
-        else:
-            print("Unable to analyze performance due to missing 'topic' column.")
+    """Main execution function."""
+    analyzer = PerformanceAnalyzer()
     
-    # Example: Generate recommendations for a specific user (replace with user_id from your data)
-    user_id = "7ZXdz3zHuNcdg9agb5YpaOGLQqw2"  
-    recommendations = generate_recommendations(user_id, performance_df)
+    # Load and process data
+    if not analyzer.load_data():
+        print("Failed to load required data")
+        return
+
+    # Analyze submissions
+    analyzer.analyze_submissions()
     
-    print("\nRecommendations for improvement:")
-    for rec in recommendations:
-        print(rec)
+    # Generate visualizations
+    analyzer.plot_performance_trends()
+    
+    # Generate and print insights
+    insights = analyzer.generate_insights()
+    print("\nPerformance Insights:")
+    for insight in insights:
+        print(insight)
 
 if __name__ == "__main__":
     main()
